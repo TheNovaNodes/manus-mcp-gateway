@@ -93,6 +93,7 @@ type Pool struct {
 	cacheTTL    time.Duration
 	lastChecked time.Time
 	rrIndex     int
+	taskCache   sync.Map
 }
 
 // NewPool initializes a new key pool.
@@ -148,7 +149,12 @@ func (p *Pool) RefreshBalances(ctx context.Context, force bool) error {
 				entry.LastError = err.Error()
 				if errors.Is(err, manus.ErrRateLimited) {
 					entry.Status = StatusRateLimited
-					entry.BackoffUntil = now.Add(5 * time.Minute)
+					backoffDuration := 5 * time.Minute
+					var rateLimitErr *manus.RateLimitError
+					if errors.As(err, &rateLimitErr) && rateLimitErr.RetryAfter > 0 {
+						backoffDuration = rateLimitErr.RetryAfter
+					}
+					entry.BackoffUntil = now.Add(backoffDuration)
 				} else if errors.Is(err, manus.ErrUnauthorized) {
 					entry.Status = StatusError
 				} else {
@@ -318,21 +324,57 @@ func (p *Pool) GetKeyByID(keyID string) (*KeyEntry, error) {
 
 // FindKeyForTask searches across all keys to locate which key created the task.
 func (p *Pool) FindKeyForTask(ctx context.Context, taskID string) (*KeyEntry, error) {
+	if val, ok := p.taskCache.Load(taskID); ok {
+		if cachedEntry, ok := val.(*KeyEntry); ok {
+			copyEntry := *cachedEntry
+			return &copyEntry, nil
+		}
+	}
+
 	p.mu.RLock()
 	keys := make([]*KeyEntry, len(p.keys))
 	copy(keys, p.keys)
 	p.mu.RUnlock()
 
-	for _, k := range keys {
-		reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-		detail, err := p.client.GetTaskDetail(reqCtx, k.Key, taskID)
-		cancel()
+	searchCtx, cancelSearch := context.WithCancel(ctx)
+	defer cancelSearch()
 
-		if err == nil && detail != nil && detail.ID == taskID {
-			copyEntry := *k
-			return &copyEntry, nil
-		}
+	var wg sync.WaitGroup
+	resultChan := make(chan *KeyEntry, len(keys))
+
+	for _, k := range keys {
+		wg.Add(1)
+		go func(entry *KeyEntry) {
+			defer wg.Done()
+			reqCtx, cancelReq := context.WithTimeout(searchCtx, 4*time.Second)
+			defer cancelReq()
+
+			detail, err := p.client.GetTaskDetail(reqCtx, entry.Key, taskID)
+			if err == nil && detail != nil && detail.ID == taskID {
+				select {
+				case resultChan <- entry:
+					cancelSearch() // Stop other goroutines
+				case <-searchCtx.Done():
+				}
+			}
+		}(k)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	if foundEntry, ok := <-resultChan; ok {
+		p.taskCache.Store(taskID, foundEntry)
+		copyEntry := *foundEntry
+		return &copyEntry, nil
 	}
 
 	return nil, fmt.Errorf("task %s not found on any configured key in pool", taskID)
+}
+
+// AssociateTaskKey stores the task-to-key association in the cache.
+func (p *Pool) AssociateTaskKey(taskID string, entry *KeyEntry) {
+	p.taskCache.Store(taskID, entry)
 }
