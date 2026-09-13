@@ -35,6 +35,19 @@ func TestParseKeys(t *testing.T) {
 	if len(keysComma) != 2 {
 		t.Fatalf("expected 2 keys from comma string, got %d", len(keysComma))
 	}
+
+	// Environment variable with quotes and prefixes
+	rawEnv := "MANUS_KEYS=\"user1@test.com sk-clean-1 user2@test.com sk-dirty-2\""
+	keysEnv := pool.ParseKeys(rawEnv)
+	if len(keysEnv) != 2 {
+		t.Fatalf("expected 2 keys from env string, got %d", len(keysEnv))
+	}
+	if keysEnv[0].ID != "user1@test.com" || keysEnv[0].Key != "sk-clean-1" {
+		t.Errorf("unexpected key 0 from env: %+v", keysEnv[0])
+	}
+	if keysEnv[1].ID != "user2@test.com" || keysEnv[1].Key != "sk-dirty-2" {
+		t.Errorf("unexpected key 1 from env: %+v", keysEnv[1])
+	}
 }
 
 func TestGreedyCreditSelection(t *testing.T) {

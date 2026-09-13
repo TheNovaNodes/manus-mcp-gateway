@@ -71,6 +71,9 @@ func loadDotEnv(path string) {
 }
 
 func main() {
+	if envFile := os.Getenv("MANUS_ENV_FILE"); envFile != "" {
+		loadDotEnv(envFile)
+	}
 	loadDotEnv(".env")
 
 	// FastMCP stdio server logs to stderr so stdin/stdout are preserved for MCP JSON-RPC
@@ -90,11 +93,17 @@ func main() {
 	rawKeys := os.Getenv("MANUS_KEYS")
 	if rawKeys == "" {
 		if filePath := os.Getenv("MANUS_KEYS_FILE"); filePath != "" {
-			data, err := os.ReadFile(filePath)
-			if err == nil {
-				rawKeys = string(data)
-			} else {
-				logger.Error(fmt.Sprintf("Failed to read MANUS_KEYS_FILE (%s): %v", filePath, err))
+			if strings.HasSuffix(filePath, ".env") {
+				loadDotEnv(filePath)
+				rawKeys = os.Getenv("MANUS_KEYS")
+			}
+			if rawKeys == "" {
+				data, err := os.ReadFile(filePath)
+				if err == nil {
+					rawKeys = string(data)
+				} else {
+					logger.Error(fmt.Sprintf("Failed to read MANUS_KEYS_FILE (%s): %v", filePath, err))
+				}
 			}
 		}
 	}
