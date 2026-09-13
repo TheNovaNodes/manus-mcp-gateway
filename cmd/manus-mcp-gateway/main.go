@@ -75,8 +75,14 @@ func main() {
 		logger.Info(fmt.Sprintf("Initialized Manus Capacity Pool with %d configured keys", len(keyEntries)))
 	}
 
+	defaultProfile := os.Getenv("MANUS_DEFAULT_PROFILE")
+	if defaultProfile == "" {
+		defaultProfile = "max"
+	}
+	logger.Info(fmt.Sprintf("Default agent profile configured as '%s'", defaultProfile))
+
 	keyPool := pool.NewPool(client, keyEntries, 3*time.Minute)
-	srv := server.NewServer(keyPool, client, logger)
+	srv := server.NewServer(keyPool, client, logger, defaultProfile)
 
 	logger.Info("Starting manus-mcp-gateway (stdio transport)...")
 	if err := mcpserver.ServeStdio(srv.MCPServer()); err != nil {

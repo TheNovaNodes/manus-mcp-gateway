@@ -16,16 +16,22 @@ import (
 
 // Server coordinates the Manus MCP gateway tools.
 type Server struct {
-	mcpServer *mcpserver.MCPServer
-	pool      *pool.Pool
-	client    *manus.Client
-	logger    *slog.Logger
+	mcpServer      *mcpserver.MCPServer
+	pool           *pool.Pool
+	client         *manus.Client
+	logger         *slog.Logger
+	defaultProfile string
 }
 
 // NewServer creates and registers all Manus MCP tools.
-func NewServer(p *pool.Pool, client *manus.Client, logger *slog.Logger) *Server {
+func NewServer(p *pool.Pool, client *manus.Client, logger *slog.Logger, defaultProfile ...string) *Server {
 	if logger == nil {
 		logger = slog.Default()
+	}
+
+	profile := "max"
+	if len(defaultProfile) > 0 && strings.TrimSpace(defaultProfile[0]) != "" {
+		profile = strings.TrimSpace(defaultProfile[0])
 	}
 
 	mcpSrv := mcpserver.NewMCPServer(
@@ -35,10 +41,11 @@ func NewServer(p *pool.Pool, client *manus.Client, logger *slog.Logger) *Server 
 	)
 
 	s := &Server{
-		mcpServer: mcpSrv,
-		pool:      p,
-		client:    client,
-		logger:    logger,
+		mcpServer:      mcpSrv,
+		pool:           p,
+		client:         client,
+		logger:         logger,
+		defaultProfile: profile,
 	}
 
 	s.registerTools()
@@ -65,7 +72,7 @@ func (s *Server) registerTools() {
 			mcp.WithDescription("Delegate a task to Manus AI autonomous cloud agent. Uses Greedy Credit Routing to automatically pick the account with maximum credits, with automatic failover."),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("Detailed task instructions for the Manus agent")),
 			mcp.WithString("title", mcp.Description("Optional descriptive title for the task")),
-			mcp.WithString("agent_profile", mcp.Description("Agent profile (default: 'manus-1.6-lite' for economical credit usage, or 'manus-1.6')")),
+			mcp.WithString("agent_profile", mcp.Description("Agent profile (default: 'max' for strongest configuration, or 'standard', 'lite')")),
 			mcp.WithString("key_id", mcp.Description("Force a specific account key ID (optional)")),
 			mcp.WithString("project_id", mcp.Description("Optional Manus project ID")),
 		),
@@ -150,7 +157,7 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 
 	agentProfile := strings.TrimSpace(req.GetString("agent_profile", ""))
 	if agentProfile == "" {
-		agentProfile = "manus-1.6-lite"
+		agentProfile = s.defaultProfile
 	}
 
 	keyID := strings.TrimSpace(req.GetString("key_id", ""))
@@ -214,8 +221,7 @@ func (s *Server) formatTaskCreatedResult(data *manus.CreateTaskData, entry *pool
 		sb.WriteString(fmt.Sprintf("- **Title:** %s\n", data.TaskTitle))
 	}
 	sb.WriteString(fmt.Sprintf("- **Assigned Key:** `%s` (`%s`)\n", entry.ID, entry.MaskedKey))
-	sb.WriteString(fmt.Sprintf("- **Initial Status:** `%s`\n", data.Status))
-	sb.WriteString("\n*Use `manus_get_task_status` with `task_id: \"" + data.TaskID + "\"` to poll for completion and inspect artifacts.*\n")
+	sb.WriteString("\n*Use `manus_get_task_status` with `task_id: \"" + data.TaskID + "\"` to poll for completion. You can continue this task today or tomorrow after credit refresh using `manus_send_message`.*\n")
 
 	return mcp.NewToolResultText(sb.String())
 }
