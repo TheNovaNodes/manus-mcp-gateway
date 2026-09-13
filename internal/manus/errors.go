@@ -3,6 +3,7 @@ package manus
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 var (
@@ -18,6 +19,22 @@ var (
 	// ErrNoCreditsAvailable indicates total_credits is 0.
 	ErrNoCreditsAvailable = errors.New("no credits available on key")
 )
+
+// RateLimitError encapsulates a rate limit error along with an optional RetryAfter duration.
+type RateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("rate limit exceeded (429), retry after %v", e.RetryAfter)
+	}
+	return "rate limit exceeded (429)"
+}
+
+func (e *RateLimitError) Is(target error) bool {
+	return target == ErrRateLimited
+}
 
 // HTTPError encapsulates an unexpected HTTP status code.
 type HTTPError struct {

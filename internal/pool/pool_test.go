@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -103,6 +104,92 @@ func TestGreedyCreditSelection(t *testing.T) {
 	}
 	if picked2.ID != "MidKey" {
 		t.Errorf("expected MidKey after rate limit on RichKey, got %s", picked2.ID)
+	}
+}
+
+func TestFindKeyForTask_ConcurrentAndCache(t *testing.T) {
+	var requestCount int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		key := r.Header.Get("x-manus-api-key")
+		time.Sleep(50 * time.Millisecond) // simulate latency
+
+		if key == "sk-target-key" && r.URL.Query().Get("task_id") == "task_target" {
+			resp := manus.TaskDetailResponse{
+				OK: true,
+				Data: &manus.TaskDetailData{
+					ID: "task_target",
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		// return 404 for others
+		w.WriteHeader(http.StatusNotFound)
+		resp := manus.StandardResponse{
+			OK:    false,
+			Error: &manus.APIError{Code: "not_found", Message: "task not found"},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	client := manus.NewClient(manus.WithBaseURL(ts.URL), manus.WithHTTPClient(ts.Client()))
+
+	keys := []*pool.KeyEntry{
+		{ID: "K1", Key: "sk-key1"},
+		{ID: "K2", Key: "sk-key2"},
+		{ID: "Target", Key: "sk-target-key"},
+		{ID: "K3", Key: "sk-key3"},
+		{ID: "K4", Key: "sk-key4"},
+	}
+
+	p := pool.NewPool(client, keys, 1*time.Minute)
+	ctx := context.Background()
+
+	// Initial lookup - should take ~50ms and return Target
+	start := time.Now()
+	entry, err := p.FindKeyForTask(ctx, "task_target")
+	duration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry.ID != "Target" {
+		t.Errorf("expected Target key, got %s", entry.ID)
+	}
+	if duration > 100*time.Millisecond { // 50ms sleep + a small buffer. If they ran sequentially it would take 250ms+
+		t.Errorf("lookup took too long (%v), likely not concurrent", duration)
+	}
+
+	// Secondary lookup - should be instant via cache
+	requestCountBefore := atomic.LoadInt32(&requestCount)
+	startCached := time.Now()
+	cachedEntry, err := p.FindKeyForTask(ctx, "task_target")
+	durationCached := time.Since(startCached)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cachedEntry.ID != "Target" {
+		t.Errorf("expected Target key, got %s", cachedEntry.ID)
+	}
+	if atomic.LoadInt32(&requestCount) != requestCountBefore {
+		t.Errorf("expected no additional requests, but got %d", atomic.LoadInt32(&requestCount)-requestCountBefore)
+	}
+	if durationCached > 10*time.Millisecond {
+		t.Errorf("cached lookup took too long (%v), cache likely not hit", durationCached)
+	}
+
+	// AssociateTaskKey test
+	p.AssociateTaskKey("task_injected", keys[0])
+	injectedEntry, err := p.FindKeyForTask(ctx, "task_injected")
+	if err != nil {
+		t.Fatalf("unexpected error for injected task: %v", err)
+	}
+	if injectedEntry.ID != "K1" {
+		t.Errorf("expected injected task to map to K1, got %s", injectedEntry.ID)
 	}
 }
 

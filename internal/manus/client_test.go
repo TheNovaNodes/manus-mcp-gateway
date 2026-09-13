@@ -3,6 +3,7 @@ package manus_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -110,6 +111,7 @@ func TestCreateTask(t *testing.T) {
 
 func TestRateLimitError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "120")
 		w.WriteHeader(http.StatusTooManyRequests)
 		resp := manus.StandardResponse{
 			OK: false,
@@ -130,8 +132,54 @@ func TestRateLimitError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if err != manus.ErrRateLimited {
+	if !errors.Is(err, manus.ErrRateLimited) {
 		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+
+	var rateLimitErr *manus.RateLimitError
+	if errors.As(err, &rateLimitErr) {
+		if rateLimitErr.RetryAfter != 120*time.Second {
+			t.Errorf("expected RetryAfter 120s, got %v", rateLimitErr.RetryAfter)
+		}
+	} else {
+		t.Errorf("expected RateLimitError, got %T", err)
+	}
+}
+
+func TestRateLimitError_HTTPDate(t *testing.T) {
+	futureTime := time.Now().Add(5 * time.Minute).UTC()
+	dateStr := futureTime.Format(time.RFC1123)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", dateStr)
+		w.WriteHeader(http.StatusTooManyRequests)
+		resp := manus.StandardResponse{
+			OK: false,
+			Error: &manus.APIError{
+				Code:    "rate_limited",
+				Message: "Rate limit exceeded",
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	client := manus.NewClient(manus.WithBaseURL(ts.URL), manus.WithHTTPClient(ts.Client()))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := client.GetAvailableCredits(ctx, "sk-test-key")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var rateLimitErr *manus.RateLimitError
+	if errors.As(err, &rateLimitErr) {
+		if rateLimitErr.RetryAfter <= 0 {
+			t.Errorf("expected positive RetryAfter, got %v", rateLimitErr.RetryAfter)
+		}
+	} else {
+		t.Errorf("expected RateLimitError, got %T", err)
 	}
 }
 

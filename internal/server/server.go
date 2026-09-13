@@ -206,7 +206,12 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 		s.logger.WarnContext(ctx, "Key attempt failed, failing over", "key_id", entry.ID, "attempt", attempt, "error", err)
 
 		if errors.Is(err, manus.ErrRateLimited) {
-			s.pool.MarkRateLimited(entry.ID, 5*time.Minute)
+			backoffDuration := 5 * time.Minute
+			var rateLimitErr *manus.RateLimitError
+			if errors.As(err, &rateLimitErr) && rateLimitErr.RetryAfter > 0 {
+				backoffDuration = rateLimitErr.RetryAfter
+			}
+			s.pool.MarkRateLimited(entry.ID, backoffDuration)
 		}
 	}
 
@@ -214,6 +219,10 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 }
 
 func (s *Server) formatTaskCreatedResult(data *manus.CreateTaskData, entry *pool.KeyEntry) *mcp.CallToolResult {
+	if data != nil && data.TaskID != "" && entry != nil {
+		s.pool.AssociateTaskKey(data.TaskID, entry)
+	}
+
 	var sb strings.Builder
 	sb.WriteString("✅ **Manus Task Dispatched Successfully!**\n\n")
 	sb.WriteString(fmt.Sprintf("- **Task ID:** `%s`\n", data.TaskID))

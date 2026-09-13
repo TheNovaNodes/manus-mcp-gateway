@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -227,12 +228,28 @@ func (c *Client) SendMessage(ctx context.Context, apiKey string, reqData SendMes
 	return nil
 }
 
+func parseRateLimitError(resp *http.Response) error {
+	var retryAfter time.Duration
+	if val := resp.Header.Get("Retry-After"); val != "" {
+		if seconds, err := strconv.Atoi(val); err == nil {
+			retryAfter = time.Duration(seconds) * time.Second
+		} else if parsedTime, err := time.Parse(time.RFC1123, val); err == nil {
+			retryAfter = time.Until(parsedTime)
+		}
+	}
+	return &RateLimitError{RetryAfter: retryAfter}
+}
+
 func (c *Client) doRequest(req *http.Request, target interface{}) error {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain remaining body to ensure connection reuse
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
 	if err != nil {
@@ -250,7 +267,7 @@ func (c *Client) doRequest(req *http.Request, target interface{}) error {
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			return ErrRateLimited
+			return parseRateLimitError(resp)
 		}
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return ErrUnauthorized
