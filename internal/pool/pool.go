@@ -46,12 +46,20 @@ func ParseKeys(raw string) []*KeyEntry {
 
 	// Attempt token-based pairing (<identifier> <sk-key>)
 	for i := 0; i < len(tokens); i++ {
-		if strings.HasPrefix(tokens[i], "sk-") {
+		match := keyRegex.FindString(tokens[i])
+		if match != "" {
 			id := fmt.Sprintf("Key_%d", len(entries)+1)
-			if i > 0 && !strings.HasPrefix(tokens[i-1], "sk-") {
-				id = tokens[i-1]
+			if i > 0 && keyRegex.FindString(tokens[i-1]) == "" {
+				candidateID := strings.Trim(tokens[i-1], "\"'=:")
+				if idx := strings.Index(candidateID, "="); idx != -1 {
+					candidateID = candidateID[idx+1:]
+				}
+				candidateID = strings.Trim(candidateID, "\"'=:")
+				if candidateID != "" && candidateID != "MANUS_KEYS" {
+					id = candidateID
+				}
 			}
-			key := tokens[i]
+			key := match
 			entries = append(entries, &KeyEntry{
 				ID:        id,
 				Key:       key,
