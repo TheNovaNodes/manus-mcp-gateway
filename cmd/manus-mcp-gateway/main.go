@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,26 +14,57 @@ import (
 )
 
 // loadDotEnv parses a local .env file if present without external dependencies.
+// It supports multiline values enclosed in double or single quotes.
 func loadDotEnv(path string) {
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			val := strings.TrimSpace(parts[1])
-			val = strings.Trim(val, `"'`)
-			if os.Getenv(key) == "" {
-				_ = os.Setenv(key, val)
+	lines := strings.Split(string(data), "\n")
+	var currentKey string
+	var currentValue strings.Builder
+	inQuote := false
+	quoteChar := byte(0)
+
+	for _, rawLine := range lines {
+		trimmed := strings.TrimSpace(rawLine)
+		if !inQuote {
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			parts := strings.SplitN(rawLine, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				val := strings.TrimSpace(parts[1])
+
+				if (strings.HasPrefix(val, "\"") || strings.HasPrefix(val, "'")) &&
+					!(len(val) >= 2 && val[0] == val[len(val)-1] && !strings.HasSuffix(val, `\`+string(val[0]))) {
+					inQuote = true
+					quoteChar = val[0]
+					currentKey = key
+					currentValue.Reset()
+					currentValue.WriteString(val[1:])
+					currentValue.WriteString("\n")
+				} else {
+					val = strings.Trim(val, `"'`)
+					if os.Getenv(key) == "" {
+						_ = os.Setenv(key, val)
+					}
+				}
+			}
+		} else {
+			if strings.HasSuffix(trimmed, string(quoteChar)) {
+				inQuote = false
+				lineWithoutQuote := strings.TrimSuffix(trimmed, string(quoteChar))
+				currentValue.WriteString(lineWithoutQuote)
+				if os.Getenv(currentKey) == "" {
+					_ = os.Setenv(currentKey, currentValue.String())
+				}
+				currentValue.Reset()
+			} else {
+				currentValue.WriteString(rawLine)
+				currentValue.WriteString("\n")
 			}
 		}
 	}

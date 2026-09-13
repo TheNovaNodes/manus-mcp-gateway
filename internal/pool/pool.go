@@ -152,7 +152,7 @@ func (p *Pool) RefreshBalances(ctx context.Context, force bool) error {
 			entry.TotalCredits = credits.TotalCredits
 			entry.RefreshCredits = credits.RefreshCredits
 			entry.MaxRefresh = credits.MaxRefreshCredits
-			entry.NextRefreshTime = credits.NextRefreshTime
+			entry.NextRefreshTime = credits.NextRefreshTime.Int64()
 			entry.RefreshInterval = credits.RefreshInterval
 			entry.LastError = ""
 

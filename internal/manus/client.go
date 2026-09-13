@@ -77,7 +77,7 @@ func (c *Client) GetAvailableCredits(ctx context.Context, apiKey string) (*Avail
 		}
 		return nil, fmt.Errorf("unexpected error in availableCredits response")
 	}
-	return &resp.Data, nil
+	return resp.ToCredits(), nil
 }
 
 // CreateTask calls POST /v2/task.create.
@@ -106,7 +106,7 @@ func (c *Client) CreateTask(ctx context.Context, apiKey string, taskReq CreateTa
 		}
 		return nil, fmt.Errorf("failed to create task")
 	}
-	return &resp.Data, nil
+	return resp.ToTaskData(), nil
 }
 
 // ListMessages calls GET /v2/task.listMessages.
@@ -142,7 +142,7 @@ func (c *Client) ListMessages(ctx context.Context, apiKey, taskID string, order 
 		}
 		return nil, fmt.Errorf("failed to list messages")
 	}
-	return resp.Data.Messages, nil
+	return resp.ToMessages(), nil
 }
 
 // GetTaskDetail calls GET /v2/task.detail.
@@ -165,7 +165,7 @@ func (c *Client) GetTaskDetail(ctx context.Context, apiKey, taskID string) (*Tas
 		}
 		return nil, fmt.Errorf("failed to get task detail")
 	}
-	return &resp.Data, nil
+	return resp.ToDetail(), nil
 }
 
 // StopTask calls POST /v2/task.stop.

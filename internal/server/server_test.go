@@ -21,7 +21,7 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 		case r.URL.Path == "/v2/usage.availableCredits":
 			resp := manus.AvailableCreditsResponse{
 				OK: true,
-				Data: manus.AvailableCredits{
+				Data: &manus.AvailableCredits{
 					TotalCredits:      300,
 					RefreshCredits:    300,
 					MaxRefreshCredits: 300,
@@ -34,7 +34,7 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 		case r.URL.Path == "/v2/task.create":
 			resp := manus.CreateTaskResponse{
 				OK: true,
-				Data: manus.CreateTaskData{
+				Data: &manus.CreateTaskData{
 					TaskID:    "task_999",
 					TaskTitle: "E2E Test Task",
 					Status:    "pending",
@@ -45,7 +45,7 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 		case r.URL.Path == "/v2/task.listMessages":
 			resp := manus.ListMessagesResponse{
 				OK: true,
-				Data: manus.ListMessagesData{
+				Data: &manus.ListMessagesData{
 					Messages: []manus.TaskMessage{
 						{
 							Type:         "status_update",
@@ -68,7 +68,7 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 		case r.URL.Path == "/v2/task.detail":
 			resp := manus.TaskDetailResponse{
 				OK: true,
-				Data: manus.TaskDetailData{
+				Data: &manus.TaskDetailData{
 					ID:     "task_999",
 					Title:  "E2E Test Task",
 					Status: "stopped",

@@ -26,7 +26,7 @@ func TestGetAvailableCredits(t *testing.T) {
 		resp := manus.AvailableCreditsResponse{
 			OK:        true,
 			RequestID: "req_123",
-			Data: manus.AvailableCredits{
+			Data: &manus.AvailableCredits{
 				TotalCredits:      300,
 				RefreshCredits:    300,
 				MaxRefreshCredits: 300,
@@ -80,7 +80,7 @@ func TestCreateTask(t *testing.T) {
 		resp := manus.CreateTaskResponse{
 			OK:        true,
 			RequestID: "req_create",
-			Data: manus.CreateTaskData{
+			Data: &manus.CreateTaskData{
 				TaskID:    "task_abc123",
 				TaskTitle: "My Task",
 				Status:    "pending",

@@ -49,7 +49,7 @@ func TestGreedyCreditSelection(t *testing.T) {
 
 		resp := manus.AvailableCreditsResponse{
 			OK: true,
-			Data: manus.AvailableCredits{
+			Data: &manus.AvailableCredits{
 				TotalCredits:      credits,
 				RefreshCredits:    credits,
 				MaxRefreshCredits: 300,
@@ -97,7 +97,7 @@ func TestPoolStatusAggregation(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := manus.AvailableCreditsResponse{
 			OK: true,
-			Data: manus.AvailableCredits{
+			Data: &manus.AvailableCredits{
 				TotalCredits:      300,
 				RefreshCredits:    300,
 				MaxRefreshCredits: 300,
