@@ -58,6 +58,16 @@ func main() {
 	)
 
 	rawKeys := os.Getenv("MANUS_KEYS")
+	if rawKeys == "" {
+		if filePath := os.Getenv("MANUS_KEYS_FILE"); filePath != "" {
+			data, err := os.ReadFile(filePath)
+			if err == nil {
+				rawKeys = string(data)
+			} else {
+				logger.Error(fmt.Sprintf("Failed to read MANUS_KEYS_FILE (%s): %v", filePath, err))
+			}
+		}
+	}
 	keyEntries := pool.ParseKeys(rawKeys)
 	if len(keyEntries) == 0 {
 		logger.Warn("MANUS_KEYS environment variable is empty or contains no valid keys. Tools requiring API keys will return errors.")
