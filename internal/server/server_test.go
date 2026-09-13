@@ -14,7 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
+func setupTestServer(t *testing.T, defaultConnectors []string, onTaskCreate func(req manus.CreateTaskRequest)) (*Server, *httptest.Server) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -32,6 +32,12 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 			_ = json.NewEncoder(w).Encode(resp)
 
 		case r.URL.Path == "/v2/task.create":
+			if onTaskCreate != nil {
+				var parsedReq manus.CreateTaskRequest
+				if err := json.NewDecoder(r.Body).Decode(&parsedReq); err == nil {
+					onTaskCreate(parsedReq)
+				}
+			}
 			resp := manus.CreateTaskResponse{
 				OK: true,
 				Data: &manus.CreateTaskData{
@@ -92,13 +98,13 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 		{ID: "TestAcc", Key: "sk-test-secret-key-1234"},
 	}
 	p := pool.NewPool(client, keys, 1*time.Minute)
-	srv := NewServer(p, client, nil)
+	srv := NewServer(p, client, nil, "max", defaultConnectors)
 
 	return srv, ts
 }
 
 func TestServerGetPoolStatus(t *testing.T) {
-	srv, ts := setupTestServer(t)
+	srv, ts := setupTestServer(t, nil, nil)
 	defer ts.Close()
 
 	ctx := context.Background()
@@ -120,7 +126,7 @@ func TestServerGetPoolStatus(t *testing.T) {
 }
 
 func TestServerCreateAndGetTask(t *testing.T) {
-	srv, ts := setupTestServer(t)
+	srv, ts := setupTestServer(t, nil, nil)
 	defer ts.Close()
 
 	ctx := context.Background()
@@ -162,7 +168,7 @@ func TestServerCreateAndGetTask(t *testing.T) {
 }
 
 func TestServerStopTask(t *testing.T) {
-	srv, ts := setupTestServer(t)
+	srv, ts := setupTestServer(t, nil, nil)
 	defer ts.Close()
 
 	ctx := context.Background()
@@ -183,7 +189,7 @@ func TestServerStopTask(t *testing.T) {
 }
 
 func TestServerSendMessage(t *testing.T) {
-	srv, ts := setupTestServer(t)
+	srv, ts := setupTestServer(t, nil, nil)
 	defer ts.Close()
 
 	ctx := context.Background()
@@ -201,5 +207,71 @@ func TestServerSendMessage(t *testing.T) {
 	sendText := sendRes.Content[0].(mcp.TextContent).Text
 	if !strings.Contains(sendText, "Message Sent!") {
 		t.Errorf("expected Message Sent confirmation, got:\n%s", sendText)
+	}
+}
+
+func TestServerCreateTaskWithConnectors(t *testing.T) {
+	var capturedReq manus.CreateTaskRequest
+	srv, ts := setupTestServer(t, nil, func(req manus.CreateTaskRequest) {
+		capturedReq = req
+	})
+	defer ts.Close()
+
+	ctx := context.Background()
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "manus_create_task"
+	req.Params.Arguments = map[string]any{
+		"prompt":     "Use custom tools",
+		"connectors": "mcp-router-novanodes, test-connector ", // Notice the trailing space for trim test
+	}
+
+	res, err := srv.handleCreateTask(ctx, req)
+	if err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+
+	if len(capturedReq.Connectors) != 2 {
+		t.Fatalf("expected 2 connectors, got %d: %v", len(capturedReq.Connectors), capturedReq.Connectors)
+	}
+	if capturedReq.Connectors[0] != "mcp-router-novanodes" || capturedReq.Connectors[1] != "test-connector" {
+		t.Errorf("connectors mismatch: %v", capturedReq.Connectors)
+	}
+
+	text := res.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(text, "**Attached Connectors:** `mcp-router-novanodes`, `test-connector`") {
+		t.Errorf("expected Attached Connectors in output, got:\n%s", text)
+	}
+}
+
+func TestServerCreateTaskWithDefaultConnectorsFallback(t *testing.T) {
+	var capturedReq manus.CreateTaskRequest
+	defaultConnectors := []string{"default-conn-1", "default-conn-2"}
+	srv, ts := setupTestServer(t, defaultConnectors, func(req manus.CreateTaskRequest) {
+		capturedReq = req
+	})
+	defer ts.Close()
+
+	ctx := context.Background()
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "manus_create_task"
+	req.Params.Arguments = map[string]any{
+		"prompt": "Use default tools",
+	}
+
+	res, err := srv.handleCreateTask(ctx, req)
+	if err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+
+	if len(capturedReq.Connectors) != 2 {
+		t.Fatalf("expected 2 connectors from fallback, got %d: %v", len(capturedReq.Connectors), capturedReq.Connectors)
+	}
+	if capturedReq.Connectors[0] != "default-conn-1" || capturedReq.Connectors[1] != "default-conn-2" {
+		t.Errorf("fallback connectors mismatch: %v", capturedReq.Connectors)
+	}
+
+	text := res.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(text, "**Attached Connectors:** `default-conn-1`, `default-conn-2`") {
+		t.Errorf("expected Attached Connectors from fallback in output, got:\n%s", text)
 	}
 }

@@ -46,6 +46,7 @@
 2. **Tie-Breaking:** If multiple keys share the highest balance, a round-robin cursor rotates between them to evenly distribute concurrency.
 3. **Automatic Failover:** If an API call returns `429 Too Many Requests`, the key enters a 5-minute backoff period and the pool immediately transparently attempts the task on the next available key.
 4. **Credit Protection (Kill-Switch):** `manus_stop_task` issues `/v2/task.stop` to abort running sessions if an agent diverges or gets caught in a loop, preserving remaining credits.
+5. **Bi-Directional Cognitive Bridge:** Manus tasks in cloud VMs can connect back to `mcp-router` via custom MCP. `MANUS_DEFAULT_CONNECTORS` allows automatic configuration of connected resources during agent dispatch. Custom MCP connector IDs can also be provided on a per-task basis through the `manus_create_task` tool.
 
 ## MCP Tool Interface
 

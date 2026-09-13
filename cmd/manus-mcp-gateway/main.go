@@ -120,8 +120,21 @@ func main() {
 	}
 	logger.Info(fmt.Sprintf("Default agent profile configured as '%s'", defaultProfile))
 
+	var defaultConnectors []string
+	if rawConnectors := os.Getenv("MANUS_DEFAULT_CONNECTORS"); rawConnectors != "" {
+		parts := strings.Split(rawConnectors, ",")
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				defaultConnectors = append(defaultConnectors, trimmed)
+			}
+		}
+		if len(defaultConnectors) > 0 {
+			logger.Info(fmt.Sprintf("Default Custom MCP connectors configured: %s", strings.Join(defaultConnectors, ", ")))
+		}
+	}
+
 	keyPool := pool.NewPool(client, keyEntries, 3*time.Minute)
-	srv := server.NewServer(keyPool, client, logger, defaultProfile)
+	srv := server.NewServer(keyPool, client, logger, defaultProfile, defaultConnectors)
 
 	logger.Info("Starting manus-mcp-gateway (stdio transport)...")
 	if err := mcpserver.ServeStdio(srv.MCPServer()); err != nil {
