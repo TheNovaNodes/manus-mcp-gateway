@@ -16,22 +16,23 @@ import (
 
 // Server coordinates the Manus MCP gateway tools.
 type Server struct {
-	mcpServer      *mcpserver.MCPServer
-	pool           *pool.Pool
-	client         *manus.Client
-	logger         *slog.Logger
-	defaultProfile string
+	mcpServer         *mcpserver.MCPServer
+	pool              *pool.Pool
+	client            *manus.Client
+	logger            *slog.Logger
+	defaultProfile    string
+	defaultConnectors []string
 }
 
 // NewServer creates and registers all Manus MCP tools.
-func NewServer(p *pool.Pool, client *manus.Client, logger *slog.Logger, defaultProfile ...string) *Server {
+func NewServer(p *pool.Pool, client *manus.Client, logger *slog.Logger, defaultProfile string, defaultConnectors []string) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	profile := "max"
-	if len(defaultProfile) > 0 && strings.TrimSpace(defaultProfile[0]) != "" {
-		profile = strings.TrimSpace(defaultProfile[0])
+	if strings.TrimSpace(defaultProfile) != "" {
+		profile = strings.TrimSpace(defaultProfile)
 	}
 
 	mcpSrv := mcpserver.NewMCPServer(
@@ -41,11 +42,12 @@ func NewServer(p *pool.Pool, client *manus.Client, logger *slog.Logger, defaultP
 	)
 
 	s := &Server{
-		mcpServer:      mcpSrv,
-		pool:           p,
-		client:         client,
-		logger:         logger,
-		defaultProfile: profile,
+		mcpServer:         mcpSrv,
+		pool:              p,
+		client:            client,
+		logger:            logger,
+		defaultProfile:    profile,
+		defaultConnectors: defaultConnectors,
 	}
 
 	s.registerTools()
@@ -73,6 +75,7 @@ func (s *Server) registerTools() {
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("Detailed task instructions for the Manus agent")),
 			mcp.WithString("title", mcp.Description("Optional descriptive title for the task")),
 			mcp.WithString("agent_profile", mcp.Description("Agent profile (default: 'max' for strongest configuration, or 'standard', 'lite')")),
+			mcp.WithString("connectors", mcp.Description("Comma-separated list of Manus Custom MCP connector IDs to attach to this task (e.g. 'mcp-router-novanodes')")),
 			mcp.WithString("key_id", mcp.Description("Force a specific account key ID (optional)")),
 			mcp.WithString("project_id", mcp.Description("Optional Manus project ID")),
 		),
@@ -163,10 +166,23 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 	keyID := strings.TrimSpace(req.GetString("key_id", ""))
 	projectID := strings.TrimSpace(req.GetString("project_id", ""))
 
+	var connectors []string
+	if rawConnectors := strings.TrimSpace(req.GetString("connectors", "")); rawConnectors != "" {
+		parts := strings.Split(rawConnectors, ",")
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				connectors = append(connectors, trimmed)
+			}
+		}
+	} else if len(s.defaultConnectors) > 0 {
+		connectors = append(connectors, s.defaultConnectors...)
+	}
+
 	taskPayload := manus.CreateTaskRequest{
 		Title:        title,
 		Message:      manus.TaskMessageInput{Content: prompt},
 		AgentProfile: agentProfile,
+		Connectors:   connectors,
 		ProjectID:    projectID,
 	}
 
@@ -180,7 +196,7 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create task on key %s: %v", keyID, err)), nil
 		}
-		return s.formatTaskCreatedResult(data, entry), nil
+		return s.formatTaskCreatedResult(data, entry, connectors), nil
 	}
 
 	// Greedy routing with automatic failover
@@ -199,7 +215,7 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 		data, err := s.client.CreateTask(ctx, entry.Key, taskPayload)
 		if err == nil {
 			s.logger.InfoContext(ctx, "Task created successfully", "task_id", data.TaskID, "key_id", entry.ID)
-			return s.formatTaskCreatedResult(data, entry), nil
+			return s.formatTaskCreatedResult(data, entry, connectors), nil
 		}
 
 		lastErr = err
@@ -218,7 +234,7 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultError(fmt.Sprintf("All %d keys in capacity pool failed to create task. Last error: %v", maxAttempts, lastErr)), nil
 }
 
-func (s *Server) formatTaskCreatedResult(data *manus.CreateTaskData, entry *pool.KeyEntry) *mcp.CallToolResult {
+func (s *Server) formatTaskCreatedResult(data *manus.CreateTaskData, entry *pool.KeyEntry, connectors []string) *mcp.CallToolResult {
 	if data != nil && data.TaskID != "" && entry != nil {
 		s.pool.AssociateTaskKey(data.TaskID, entry)
 	}
@@ -230,6 +246,9 @@ func (s *Server) formatTaskCreatedResult(data *manus.CreateTaskData, entry *pool
 		sb.WriteString(fmt.Sprintf("- **Title:** %s\n", data.TaskTitle))
 	}
 	sb.WriteString(fmt.Sprintf("- **Assigned Key:** `%s` (`%s`)\n", entry.ID, entry.MaskedKey))
+	if len(connectors) > 0 {
+		sb.WriteString(fmt.Sprintf("- **Attached Connectors:** `%s`\n", strings.Join(connectors, "`, `")))
+	}
 	sb.WriteString("\n*Use `manus_get_task_status` with `task_id: \"" + data.TaskID + "\"` to poll for completion. You can continue this task today or tomorrow after credit refresh using `manus_send_message`.*\n")
 
 	return mcp.NewToolResultText(sb.String())

@@ -16,7 +16,7 @@ Pure Go Model Context Protocol (MCP) server for Manus AI (`api.manus.ai` v2) fea
 | Tool Name | Description | Key Parameters |
 |---|---|---|
 | `manus_get_pool_status` | Returns a breakdown of all keys, available credits, refresh dates, and pool total. | *(none)* |
-| `manus_create_task` | Launches an asynchronous autonomous task on Manus cloud VM. | `prompt` (req), `agent_profile`, `title`, `key_id` |
+| `manus_create_task` | Launches an asynchronous autonomous task on Manus cloud VM. | `prompt` (req), `agent_profile`, `title`, `key_id`, `connectors` |
 | `manus_get_task_status` | Polls progress, retrieves assistant commentary and generated artifacts. | `task_id` (req), `key_id`, `order`, `limit` |
 | `manus_stop_task` | Aborts a running task to stop credit consumption immediately. | `task_id` (req), `key_id` |
 | `manus_send_message` | Sends follow-up instructions to an active session. | `task_id` (req), `content` (req), `key_id` |
@@ -40,6 +40,12 @@ Set `MANUS_KEYS` in your environment or `.env` file:
 
 ```bash
 MANUS_KEYS="acc1@novanodes.ai sk-key1 acc2@novanodes.ai sk-key2"
+```
+
+Optionally, attach custom Custom MCP Connectors by default using `MANUS_DEFAULT_CONNECTORS`:
+
+```bash
+MANUS_DEFAULT_CONNECTORS="mcp-router-novanodes,other-connector"
 ```
 
 ## Integration with mcp-router
