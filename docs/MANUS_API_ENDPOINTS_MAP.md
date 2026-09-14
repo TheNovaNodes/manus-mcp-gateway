@@ -151,3 +151,32 @@ The remaining 24 endpoints (`agent.*`, `project.*`, `skill.*`, `webhook.*`, `web
 1. **Keep Your Agent Lean:** Default to **Tier 1 (2 tools)**. Your agent will think faster, hallucinate less, and cost significantly fewer tokens.
 2. **Add Tier 2 When Needed:** If building a bidirectional interactive assistant (like a Telegram or Slack bot) that needs to answer questions during a task or handle human-in-the-loop approvals, add `manus_send_message` and `manus_confirm_action`.
 3. **Use Direct REST for Admin Tasks:** For project management, webhook registration, or website publishing, call the REST endpoints directly in setup scripts rather than burdening the agent's real-time reasoning window.
+
+---
+
+## ⚖️ Official Peer-Review & Operational Caveats (Manus AI Architectural Audit)
+
+Prior to publishing, we dispatched our complete RFC and endpoint matrix directly to **Manus AI** (`agent_profile: "max"`) running in an autonomous cloud VM sandbox to conduct a rigorous peer-review of our architectural model:
+
+> **Manus Verdict:**  
+> *"The anti-tool-sprawl thesis is strong and worth publishing. A small, task-oriented MCP surface is usually better than exposing every low-level API endpoint to an autonomous coding agent. The gateway's five-tool façade is a reasonable default profile, and the separation between worker and supervisor capabilities is a good foundation."*
+
+### ⚠️ Critical Operational Caveats Highlighted by Manus:
+
+1. **Multi-Key vs Multi-Tenant Principle (Rate Limits are Per-User):**  
+   Manus official documentation ([Rate Limits](https://open.manus.im/docs/v2/rate-limits)) specifies that request counters are enforced **per user/account**, shared across all API keys belonging to that user.  
+   - Generating 7 API keys under a single Manus account does **not** create 7 independent request buckets.
+   - True additive throughput and capacity pooling is only achieved when credentials represent **distinct, independently authorized principals/accounts** (e.g. separate email accounts, as configured in the NovaNodes pool).
+   - Our system is therefore formally defined as a **Principal-Aware Multi-Account Credential Router**, not a single-user key multiplier.
+
+2. **Non-Idempotent Task Creation & Blind Retries:**  
+   Retrying `POST /v2/task.create` upon network timeouts without an idempotency key or metadata reconciliation risks creating duplicate billable tasks. Applications must reconcile task state or require explicit operator confirmation on ambiguous timeouts.
+
+3. **Task Lifecycle & The `waiting` State Protocol:**  
+   Manus tasks enter a `waiting` state during sensitive operations:
+   - If `waiting_for_event_type` is an agent clarification question: respond via `task.sendMessage`.
+   - If `waiting_for_event_type` is a browser action or credential confirmation: respond via `task.confirmAction` (with a strict fail-closed security policy).
+
+4. **Webhooks vs Polling Fan-Out:**  
+   For production scale, webhooks with RSA-SHA256 signature verification (`GET /v2/webhook.publicKey`) are officially recommended over polling `task.listMessages`, eliminating request fan-out and latency.
+
