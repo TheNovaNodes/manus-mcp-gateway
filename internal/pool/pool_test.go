@@ -13,6 +13,90 @@ import (
 	"github.com/TheNovaNodes/manus-mcp-gateway/internal/pool"
 )
 
+func TestSingleKeyInit(t *testing.T) {
+	rawEnv := "sk-single-key-test"
+	keys := pool.ParseKeys(rawEnv)
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+	if keys[0].Key != "sk-single-key-test" {
+		t.Errorf("unexpected key: %+v", keys[0])
+	}
+}
+
+func TestRefreshBalancesThunderingHerd(t *testing.T) {
+	var requestCount int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		resp := manus.AvailableCreditsResponse{
+			OK:   true,
+			Data: &manus.AvailableCredits{TotalCredits: 300},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	client := manus.NewClient(manus.WithBaseURL(ts.URL), manus.WithHTTPClient(ts.Client()))
+	keys := []*pool.KeyEntry{{ID: "K1", Key: "sk-key1"}}
+	p := pool.NewPool(client, keys, 1*time.Minute)
+	ctx := context.Background()
+
+	// Launch multiple concurrent refresh calls
+	done := make(chan bool)
+	for i := 0; i < 10; i++ {
+		go func() {
+			_ = p.RefreshBalances(ctx, false)
+			done <- true
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	// Given cacheTTL is 1 minute, the API should only have been hit exactly once for the key
+	// regardless of how many goroutines called RefreshBalances concurrently.
+	if atomic.LoadInt32(&requestCount) != 1 {
+		t.Errorf("expected exactly 1 API call due to cache and mutex, got %d", atomic.LoadInt32(&requestCount))
+	}
+}
+
+func TestRefreshBalancesContextCancellation(t *testing.T) {
+	blocker := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-blocker
+		_ = json.NewEncoder(w).Encode(manus.AvailableCreditsResponse{
+			OK:   true,
+			Data: &manus.AvailableCredits{TotalCredits: 300},
+		})
+	}))
+	defer func() {
+		close(blocker)
+		ts.Close()
+	}()
+
+	client := manus.NewClient(manus.WithBaseURL(ts.URL), manus.WithHTTPClient(ts.Client()))
+	keys := []*pool.KeyEntry{{ID: "K1", Key: "sk-key1"}}
+	p := pool.NewPool(client, keys, 1*time.Minute)
+
+	// Start a long-running refresh
+	go func() {
+		_ = p.RefreshBalances(context.Background(), false)
+	}()
+
+	// Give it a moment to enter refreshing state
+	time.Sleep(20 * time.Millisecond)
+
+	// Caller with cancelled context should abort immediately
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := p.RefreshBalances(cancelCtx, false)
+	if err == nil {
+		t.Errorf("expected cancellation error, got nil")
+	}
+}
+
 func TestParseKeys(t *testing.T) {
 	raw := "acc1@novanodes.ai sk-key1 acc2@novanodes.ai sk-key2 acc3@novanodes.ai sk-key3"
 	keys := pool.ParseKeys(raw)

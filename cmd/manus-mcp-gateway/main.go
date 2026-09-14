@@ -107,6 +107,10 @@ func main() {
 			}
 		}
 	}
+
+	if rawKeys == "" {
+		rawKeys = os.Getenv("MANUS_API_KEY")
+	}
 	keyEntries := pool.ParseKeys(rawKeys)
 	if len(keyEntries) == 0 {
 		logger.Warn("MANUS_KEYS environment variable is empty or contains no valid keys. Tools requiring API keys will return errors.")

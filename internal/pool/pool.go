@@ -94,6 +94,8 @@ type Pool struct {
 	lastChecked time.Time
 	rrIndex     int
 	taskCache   sync.Map
+	refreshing  bool
+	refreshDone chan struct{}
 }
 
 // NewPool initializes a new key pool.
@@ -122,9 +124,30 @@ func (p *Pool) RefreshBalances(ctx context.Context, force bool) error {
 		p.mu.Unlock()
 		return nil
 	}
+
+	if p.refreshing {
+		done := p.refreshDone
+		p.mu.Unlock()
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	p.refreshing = true
+	p.refreshDone = make(chan struct{})
 	keys := make([]*KeyEntry, len(p.keys))
 	copy(keys, p.keys)
 	p.mu.Unlock()
+
+	defer func() {
+		p.mu.Lock()
+		p.refreshing = false
+		close(p.refreshDone)
+		p.mu.Unlock()
+	}()
 
 	if len(keys) == 0 {
 		return ErrNoKeysInPool
@@ -223,7 +246,7 @@ func (p *Pool) GetPoolStatus(ctx context.Context) (*PoolStatus, error) {
 
 // PickKey selects best key using Greedy Credit Routing (key with highest credits).
 // If ties exist, uses round-robin.
-func (p *Pool) PickKey(ctx context.Context) (*KeyEntry, error) {
+func (p *Pool) PickKey(ctx context.Context, excludeIDs ...string) (*KeyEntry, error) {
 	if err := p.RefreshBalances(ctx, false); err != nil && !errors.Is(err, ErrNoKeysInPool) {
 		// Log or continue with cached state
 	}
@@ -238,7 +261,15 @@ func (p *Pool) PickKey(ctx context.Context) (*KeyEntry, error) {
 	now := time.Now()
 	var candidates []*KeyEntry
 
+	excluded := make(map[string]bool)
+	for _, id := range excludeIDs {
+		excluded[id] = true
+	}
+
 	for _, k := range p.keys {
+		if excluded[k.ID] {
+			continue
+		}
 		// Ignore keys currently in backoff or error
 		if k.Status == StatusError {
 			continue
@@ -255,6 +286,25 @@ func (p *Pool) PickKey(ctx context.Context) (*KeyEntry, error) {
 	// Fallback: if all healthy keys exhausted, pick any non-error key whose backoff has passed
 	if len(candidates) == 0 {
 		for _, k := range p.keys {
+			if excluded[k.ID] {
+				continue
+			}
+			if k.Status == StatusError {
+				continue
+			}
+			if !k.BackoffUntil.IsZero() && now.Before(k.BackoffUntil) {
+				continue
+			}
+			candidates = append(candidates, k)
+		}
+	}
+
+	// Final fallback if everything is backoff/exhausted
+	if len(candidates) == 0 {
+		for _, k := range p.keys {
+			if excluded[k.ID] {
+				continue
+			}
 			if k.Status != StatusError {
 				candidates = append(candidates, k)
 			}

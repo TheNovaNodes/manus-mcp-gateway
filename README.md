@@ -103,7 +103,7 @@ Curious about the entire Manus API v2 ecosystem? We conducted a rigorous **empir
 
 ### ⭐ Curated Must-Have Toolset
 - **Tier 1 (Core Must-Have — 95% of use cases):** `manus_create_task`, `manus_get_task_status`.
-- **Tier 2 (Interactive Workflows & Pipelines):** `manus_send_message`, `manus_confirm_action`, `manus_stop_task`, `manus_upload_file`.
+- **Tier 2 (Interactive Workflows & Pipelines):** `manus_send_message`, `manus_confirm_action` (roadmap), `manus_stop_task`, `manus_upload_file`.
 - **Tier 3 (Cluster Infrastructure SRE):** `manus_get_pool_status`.
 - **Excluded (Human / REST-only):** `agent.*`, `project.*`, `skill.*`, `browser.*`, `webhook.*`, `website.*`, `*.delete`.
 

@@ -96,7 +96,7 @@ These two tools satisfy 95% of real-world use cases:
 ### 🟡 Tier 2: Interactive Follow-Up & File Pipeline (Optional)
 Recommended for long-running chat sessions or complex multi-step workflows:
 3. **`manus_send_message` (`POST /v2/task.sendMessage`)** — Multi-turn conversation steering and answering agent questions.
-4. **`manus_confirm_action` (`POST /v2/task.confirmAction`)** — Approves pending browser actions when agent status pauses in `waiting` (`waiting_for_event_id`).
+4. **`manus_confirm_action` (`POST /v2/task.confirmAction`)** — Approves pending browser actions when agent status pauses in `waiting` (`waiting_for_event_id`). *(Note: This is a roadmap/future endpoint and not currently registered as an active MCP tool).*
 5. **`manus_stop_task` (`POST /v2/task.stop`)** — Safety abort button to halt runaway tasks and conserve credits.
 6. **`manus_upload_file` (`POST /v2/file.upload`)** — Attaches local documents, CSVs, or codebases to Manus tasks.
 
@@ -149,7 +149,7 @@ The remaining 24 endpoints (`agent.*`, `project.*`, `skill.*`, `webhook.*`, `web
 ## 🛠️ Architecture Recommendations for Developers
 
 1. **Keep Your Agent Lean:** Default to **Tier 1 (2 tools)**. Your agent will think faster, hallucinate less, and cost significantly fewer tokens.
-2. **Add Tier 2 When Needed:** If building a bidirectional interactive assistant (like a Telegram or Slack bot) that needs to answer questions during a task or handle human-in-the-loop approvals, add `manus_send_message` and `manus_confirm_action`.
+2. **Add Tier 2 When Needed:** If building a bidirectional interactive assistant (like a Telegram or Slack bot) that needs to answer questions during a task or handle human-in-the-loop approvals, add `manus_send_message` and `manus_confirm_action` (when available).
 3. **Use Direct REST for Admin Tasks:** For project management, webhook registration, or website publishing, call the REST endpoints directly in setup scripts rather than burdening the agent's real-time reasoning window.
 
 ---

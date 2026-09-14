@@ -13,6 +13,9 @@ bin/
 # Environment & Secrets
 .env
 .env.local
+.env.*
+*.keys
+*.pem
 
 # IDE
 .idea/
