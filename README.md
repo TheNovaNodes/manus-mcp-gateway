@@ -89,6 +89,26 @@ Applying Occam's Razor: the agent only needs to **delegate** work and **retrieve
 
 ---
 
+## 🗺️ Complete Verified API Map & Tool Hygiene Guidelines
+
+Curious about the entire Manus API v2 ecosystem? We conducted a rigorous **empirical live probe of all 31 known endpoints** against `api.manus.ai` to verify their existence, response formats, and argument constraints:
+
+👉 **[Read the Full Verified Endpoints Map & Cognitive Architecture Guide (docs/MANUS_API_ENDPOINTS_MAP.md)](docs/MANUS_API_ENDPOINTS_MAP.md)**
+
+### ⚠️ Why Exposing All 31 Endpoints as MCP Tools is Harmful
+- **Token Tax & Context Drain:** 30+ tool schemas inject 4,000–8,000 tokens of static descriptions on *every single LLM turn*.
+- **Tool Selection Hallucinations:** High decision entropy causes models to invoke administrative CRUD tools (`agent.update`, `project.create`, `browser.onlineList`) instead of executing user tasks.
+- **Administrative Traps:** Agents get trapped in recursive discovery and inspection loops.
+- **Destructive Blast Radius:** Exposing endpoints like `task.delete`, `file.delete`, and `webhook.delete` to autonomous agents invites accidental data loss.
+
+### ⭐ Curated Must-Have Toolset
+- **Tier 1 (Core Must-Have — 95% of use cases):** `manus_create_task`, `manus_get_task_status`.
+- **Tier 2 (Interactive Workflows & Pipelines):** `manus_send_message`, `manus_confirm_action`, `manus_stop_task`, `manus_upload_file`.
+- **Tier 3 (Cluster Infrastructure SRE):** `manus_get_pool_status`.
+- **Excluded (Human / REST-only):** `agent.*`, `project.*`, `skill.*`, `browser.*`, `webhook.*`, `website.*`, `*.delete`.
+
+---
+
 ## 🚀 Quickstart & Installation
 
 ### Option A: Install via Go
