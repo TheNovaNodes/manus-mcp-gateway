@@ -52,6 +52,25 @@ func MaskAPIKey(k string) string {
 	return fmt.Sprintf("%s...%s", k[:4], k[len(k)-4:])
 }
 
+// MaskID masks PII such as email addresses.
+func MaskID(id string) string {
+	id = strings.TrimSpace(id)
+	if idx := strings.Index(id, "@"); idx != -1 {
+		if idx > 0 {
+			return string(id[0]) + "***" + id[idx:]
+		}
+		return "***" + id[idx:]
+	}
+	return id
+}
+
+// SanitizeMessage masks any occurrences of raw API keys in the given string.
+func SanitizeMessage(msg string) string {
+	return keyRegex.ReplaceAllStringFunc(msg, func(k string) string {
+		return MaskAPIKey(k)
+	})
+}
+
 // PoolStatus summary of the entire 7-key capacity pool.
 type PoolStatus struct {
 	TotalKeys        int         `json:"total_keys"`

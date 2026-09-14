@@ -132,7 +132,7 @@ func (s *Server) handleGetPoolStatus(ctx context.Context, req mcp.CallToolReques
 
 	for _, k := range status.Keys {
 		sb.WriteString(fmt.Sprintf("| `%s` | `%s` | **%d** | %d | %s | %s |\n",
-			k.ID,
+			pool.MaskID(k.ID),
 			k.MaskedKey,
 			k.TotalCredits,
 			k.MaxRefresh,
@@ -174,11 +174,11 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 	if keyID != "" {
 		entry, err := s.pool.GetKeyByID(keyID)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(pool.SanitizeMessage(err.Error())), nil
 		}
 		data, err := s.client.CreateTask(ctx, entry.Key, taskPayload)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to create task on key %s: %v", keyID, err)), nil
+			return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Failed to create task on key %s: %v", keyID, err))), nil
 		}
 		return s.formatTaskCreatedResult(data, entry), nil
 	}
@@ -190,11 +190,13 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	var lastErr error
+	var triedKeys []string
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		entry, err := s.pool.PickKey(ctx)
+		entry, err := s.pool.PickKey(ctx, triedKeys...)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Key selection error: %v", err)), nil
+			return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Key selection error: %v", err))), nil
 		}
+		triedKeys = append(triedKeys, entry.ID)
 
 		data, err := s.client.CreateTask(ctx, entry.Key, taskPayload)
 		if err == nil {
@@ -215,7 +217,7 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 		}
 	}
 
-	return mcp.NewToolResultError(fmt.Sprintf("All %d keys in capacity pool failed to create task. Last error: %v", maxAttempts, lastErr)), nil
+	return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("All %d keys in capacity pool failed to create task. Last error: %v", maxAttempts, lastErr))), nil
 }
 
 func (s *Server) formatTaskCreatedResult(data *manus.CreateTaskData, entry *pool.KeyEntry) *mcp.CallToolResult {
@@ -251,7 +253,7 @@ func (s *Server) handleGetTaskStatus(ctx context.Context, req mcp.CallToolReques
 	if keyID != "" {
 		targetKey, err = s.pool.GetKeyByID(keyID)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(pool.SanitizeMessage(err.Error())), nil
 		}
 	} else {
 		targetKey, err = s.pool.FindKeyForTask(ctx, taskID)
@@ -259,14 +261,14 @@ func (s *Server) handleGetTaskStatus(ctx context.Context, req mcp.CallToolReques
 			// Fallback: search by attempting ListMessages on keys until one succeeds
 			targetKey, err = s.searchKeyByMessages(ctx, taskID)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Could not find task %s on any key: %v", taskID, err)), nil
+				return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Could not find task %s on any key: %v", taskID, err))), nil
 			}
 		}
 	}
 
 	messages, err := s.client.ListMessages(ctx, targetKey.Key, taskID, order, limit)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Failed to list messages for task %s: %v", taskID, err)), nil
+		return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Failed to list messages for task %s: %v", taskID, err))), nil
 	}
 
 	// Aggregate status and attachments
@@ -274,20 +276,42 @@ func (s *Server) handleGetTaskStatus(ctx context.Context, req mcp.CallToolReques
 	var assistantTexts []string
 	var attachments []manus.Attachment
 
-	for _, msg := range messages {
-		if msg.Type == "status_update" && msg.StatusUpdate != nil {
-			if msg.StatusUpdate.AgentStatus == "stopped" {
-				finalStatus = "completed (stopped)"
-			} else if msg.StatusUpdate.AgentStatus != "" {
-				finalStatus = msg.StatusUpdate.AgentStatus
+	// Process messages depending on order to ensure newest status isn't overwritten by older ones
+	if order == "desc" {
+		for i := len(messages) - 1; i >= 0; i-- {
+			msg := messages[i]
+			if msg.Type == "status_update" && msg.StatusUpdate != nil {
+				if msg.StatusUpdate.AgentStatus == "stopped" {
+					finalStatus = "completed (stopped)"
+				} else if msg.StatusUpdate.AgentStatus != "" {
+					finalStatus = msg.StatusUpdate.AgentStatus
+				}
+			} else if msg.Type == "assistant_message" && msg.AssistantMessage != nil {
+				body := strings.TrimSpace(msg.AssistantMessage.Body())
+				if body != "" {
+					assistantTexts = append(assistantTexts, body)
+				}
+				if len(msg.AssistantMessage.Attachments) > 0 {
+					attachments = append(attachments, msg.AssistantMessage.Attachments...)
+				}
 			}
-		} else if msg.Type == "assistant_message" && msg.AssistantMessage != nil {
-			body := strings.TrimSpace(msg.AssistantMessage.Body())
-			if body != "" {
-				assistantTexts = append(assistantTexts, body)
-			}
-			if len(msg.AssistantMessage.Attachments) > 0 {
-				attachments = append(attachments, msg.AssistantMessage.Attachments...)
+		}
+	} else {
+		for _, msg := range messages {
+			if msg.Type == "status_update" && msg.StatusUpdate != nil {
+				if msg.StatusUpdate.AgentStatus == "stopped" {
+					finalStatus = "completed (stopped)"
+				} else if msg.StatusUpdate.AgentStatus != "" {
+					finalStatus = msg.StatusUpdate.AgentStatus
+				}
+			} else if msg.Type == "assistant_message" && msg.AssistantMessage != nil {
+				body := strings.TrimSpace(msg.AssistantMessage.Body())
+				if body != "" {
+					assistantTexts = append(assistantTexts, body)
+				}
+				if len(msg.AssistantMessage.Attachments) > 0 {
+					attachments = append(attachments, msg.AssistantMessage.Attachments...)
+				}
 			}
 		}
 	}
@@ -351,15 +375,18 @@ func (s *Server) handleStopTask(ctx context.Context, req mcp.CallToolRequest) (*
 	if keyID != "" {
 		targetKey, err = s.pool.GetKeyByID(keyID)
 	} else {
-		targetKey, err = s.searchKeyByMessages(ctx, taskID)
+		targetKey, err = s.pool.FindKeyForTask(ctx, taskID)
+		if err != nil {
+			targetKey, err = s.searchKeyByMessages(ctx, taskID)
+		}
 	}
 
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Could not resolve key for task %s: %v", taskID, err)), nil
+		return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Could not resolve key for task %s: %v", taskID, err))), nil
 	}
 
 	if err := s.client.StopTask(ctx, targetKey.Key, taskID); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Failed to stop task %s: %v", taskID, err)), nil
+		return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Failed to stop task %s: %v", taskID, err))), nil
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("🛑 **Task Stopped!**\n\nManus task `%s` on key `%s` has been stopped immediately. Credit consumption has been halted.", taskID, targetKey.ID)), nil
@@ -379,11 +406,14 @@ func (s *Server) handleSendMessage(ctx context.Context, req mcp.CallToolRequest)
 	if keyID != "" {
 		targetKey, err = s.pool.GetKeyByID(keyID)
 	} else {
-		targetKey, err = s.searchKeyByMessages(ctx, taskID)
+		targetKey, err = s.pool.FindKeyForTask(ctx, taskID)
+		if err != nil {
+			targetKey, err = s.searchKeyByMessages(ctx, taskID)
+		}
 	}
 
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Could not resolve key for task %s: %v", taskID, err)), nil
+		return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Could not resolve key for task %s: %v", taskID, err))), nil
 	}
 
 	err = s.client.SendMessage(ctx, targetKey.Key, manus.SendMessageRequest{
@@ -391,7 +421,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req mcp.CallToolRequest)
 		Message: manus.TaskMessageInput{Content: content},
 	})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Failed to send message to task %s: %v", taskID, err)), nil
+		return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Failed to send message to task %s: %v", taskID, err))), nil
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("💬 **Message Sent!**\n\nFollow-up message successfully delivered to task `%s`.", taskID)), nil
