@@ -107,7 +107,7 @@ func main() {
 			}
 		}
 	}
-	
+
 	if rawKeys == "" {
 		rawKeys = os.Getenv("MANUS_API_KEY")
 	}

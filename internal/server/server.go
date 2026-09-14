@@ -231,7 +231,7 @@ func (s *Server) formatTaskCreatedResult(data *manus.CreateTaskData, entry *pool
 	if data.TaskTitle != "" {
 		sb.WriteString(fmt.Sprintf("- **Title:** %s\n", data.TaskTitle))
 	}
-	sb.WriteString(fmt.Sprintf("- **Assigned Key:** `%s` (`%s`)\n", entry.ID, entry.MaskedKey))
+	sb.WriteString(fmt.Sprintf("- **Assigned Key:** `%s` (`%s`)\n", pool.MaskID(entry.ID), entry.MaskedKey))
 	sb.WriteString("\n*Use `manus_get_task_status` with `task_id: \"" + data.TaskID + "\"` to poll for completion. You can continue this task today or tomorrow after credit refresh using `manus_send_message`.*\n")
 
 	return mcp.NewToolResultText(sb.String())
@@ -276,42 +276,29 @@ func (s *Server) handleGetTaskStatus(ctx context.Context, req mcp.CallToolReques
 	var assistantTexts []string
 	var attachments []manus.Attachment
 
-	// Process messages depending on order to ensure newest status isn't overwritten by older ones
+	// Process messages in chronological order so newest status isn't overwritten by older ones
+	chronoMsgs := messages
 	if order == "desc" {
-		for i := len(messages) - 1; i >= 0; i-- {
-			msg := messages[i]
-			if msg.Type == "status_update" && msg.StatusUpdate != nil {
-				if msg.StatusUpdate.AgentStatus == "stopped" {
-					finalStatus = "completed (stopped)"
-				} else if msg.StatusUpdate.AgentStatus != "" {
-					finalStatus = msg.StatusUpdate.AgentStatus
-				}
-			} else if msg.Type == "assistant_message" && msg.AssistantMessage != nil {
-				body := strings.TrimSpace(msg.AssistantMessage.Body())
-				if body != "" {
-					assistantTexts = append(assistantTexts, body)
-				}
-				if len(msg.AssistantMessage.Attachments) > 0 {
-					attachments = append(attachments, msg.AssistantMessage.Attachments...)
-				}
-			}
+		chronoMsgs = make([]manus.TaskMessage, len(messages))
+		for i, msg := range messages {
+			chronoMsgs[len(messages)-1-i] = msg
 		}
-	} else {
-		for _, msg := range messages {
-			if msg.Type == "status_update" && msg.StatusUpdate != nil {
-				if msg.StatusUpdate.AgentStatus == "stopped" {
-					finalStatus = "completed (stopped)"
-				} else if msg.StatusUpdate.AgentStatus != "" {
-					finalStatus = msg.StatusUpdate.AgentStatus
-				}
-			} else if msg.Type == "assistant_message" && msg.AssistantMessage != nil {
-				body := strings.TrimSpace(msg.AssistantMessage.Body())
-				if body != "" {
-					assistantTexts = append(assistantTexts, body)
-				}
-				if len(msg.AssistantMessage.Attachments) > 0 {
-					attachments = append(attachments, msg.AssistantMessage.Attachments...)
-				}
+	}
+
+	for _, msg := range chronoMsgs {
+		if msg.Type == "status_update" && msg.StatusUpdate != nil {
+			if msg.StatusUpdate.AgentStatus == "stopped" {
+				finalStatus = "completed (stopped)"
+			} else if msg.StatusUpdate.AgentStatus != "" {
+				finalStatus = msg.StatusUpdate.AgentStatus
+			}
+		} else if msg.Type == "assistant_message" && msg.AssistantMessage != nil {
+			body := strings.TrimSpace(msg.AssistantMessage.Body())
+			if body != "" {
+				assistantTexts = append(assistantTexts, body)
+			}
+			if len(msg.AssistantMessage.Attachments) > 0 {
+				attachments = append(attachments, msg.AssistantMessage.Attachments...)
 			}
 		}
 	}
@@ -319,7 +306,7 @@ func (s *Server) handleGetTaskStatus(ctx context.Context, req mcp.CallToolReques
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("### 🤖 Manus Task Status: `%s`\n\n", taskID))
 	sb.WriteString(fmt.Sprintf("- **Current Status:** `%s`\n", finalStatus))
-	sb.WriteString(fmt.Sprintf("- **Account:** `%s` (`%s`)\n", targetKey.ID, targetKey.MaskedKey))
+	sb.WriteString(fmt.Sprintf("- **Account:** `%s` (`%s`)\n", pool.MaskID(targetKey.ID), targetKey.MaskedKey))
 	sb.WriteString(fmt.Sprintf("- **Total Events Retrieved:** %d\n\n", len(messages)))
 
 	if len(assistantTexts) > 0 {
@@ -389,7 +376,7 @@ func (s *Server) handleStopTask(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(pool.SanitizeMessage(fmt.Sprintf("Failed to stop task %s: %v", taskID, err))), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("🛑 **Task Stopped!**\n\nManus task `%s` on key `%s` has been stopped immediately. Credit consumption has been halted.", taskID, targetKey.ID)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("🛑 **Task Stopped!**\n\nManus task `%s` on key `%s` has been stopped immediately. Credit consumption has been halted.", taskID, pool.MaskID(targetKey.ID))), nil
 }
 
 func (s *Server) handleSendMessage(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

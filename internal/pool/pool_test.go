@@ -29,7 +29,7 @@ func TestRefreshBalancesThunderingHerd(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requestCount, 1)
 		resp := manus.AvailableCreditsResponse{
-			OK: true,
+			OK:   true,
 			Data: &manus.AvailableCredits{TotalCredits: 300},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -58,6 +58,42 @@ func TestRefreshBalancesThunderingHerd(t *testing.T) {
 	// regardless of how many goroutines called RefreshBalances concurrently.
 	if atomic.LoadInt32(&requestCount) != 1 {
 		t.Errorf("expected exactly 1 API call due to cache and mutex, got %d", atomic.LoadInt32(&requestCount))
+	}
+}
+
+func TestRefreshBalancesContextCancellation(t *testing.T) {
+	blocker := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-blocker
+		_ = json.NewEncoder(w).Encode(manus.AvailableCreditsResponse{
+			OK:   true,
+			Data: &manus.AvailableCredits{TotalCredits: 300},
+		})
+	}))
+	defer func() {
+		close(blocker)
+		ts.Close()
+	}()
+
+	client := manus.NewClient(manus.WithBaseURL(ts.URL), manus.WithHTTPClient(ts.Client()))
+	keys := []*pool.KeyEntry{{ID: "K1", Key: "sk-key1"}}
+	p := pool.NewPool(client, keys, 1*time.Minute)
+
+	// Start a long-running refresh
+	go func() {
+		_ = p.RefreshBalances(context.Background(), false)
+	}()
+
+	// Give it a moment to enter refreshing state
+	time.Sleep(20 * time.Millisecond)
+
+	// Caller with cancelled context should abort immediately
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := p.RefreshBalances(cancelCtx, false)
+	if err == nil {
+		t.Errorf("expected cancellation error, got nil")
 	}
 }
 

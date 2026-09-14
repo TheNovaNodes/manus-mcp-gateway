@@ -88,13 +88,14 @@ func ParseKeys(raw string) []*KeyEntry {
 // Pool coordinates multi-key state, greedy credit balancing, and failover.
 type Pool struct {
 	mu          sync.RWMutex
-	refreshMu   sync.Mutex
 	client      *manus.Client
 	keys        []*KeyEntry
 	cacheTTL    time.Duration
 	lastChecked time.Time
 	rrIndex     int
 	taskCache   sync.Map
+	refreshing  bool
+	refreshDone chan struct{}
 }
 
 // NewPool initializes a new key pool.
@@ -118,17 +119,35 @@ func (p *Pool) KeyCount() int {
 
 // RefreshBalances queries /v2/usage.availableCredits for all keys concurrently.
 func (p *Pool) RefreshBalances(ctx context.Context, force bool) error {
-	p.refreshMu.Lock()
-	defer p.refreshMu.Unlock()
-
-	p.mu.RLock()
+	p.mu.Lock()
 	if !force && time.Since(p.lastChecked) < p.cacheTTL && p.lastChecked != (time.Time{}) {
-		p.mu.RUnlock()
+		p.mu.Unlock()
 		return nil
 	}
+
+	if p.refreshing {
+		done := p.refreshDone
+		p.mu.Unlock()
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	p.refreshing = true
+	p.refreshDone = make(chan struct{})
 	keys := make([]*KeyEntry, len(p.keys))
 	copy(keys, p.keys)
-	p.mu.RUnlock()
+	p.mu.Unlock()
+
+	defer func() {
+		p.mu.Lock()
+		p.refreshing = false
+		close(p.refreshDone)
+		p.mu.Unlock()
+	}()
 
 	if len(keys) == 0 {
 		return ErrNoKeysInPool
@@ -279,7 +298,7 @@ func (p *Pool) PickKey(ctx context.Context, excludeIDs ...string) (*KeyEntry, er
 			candidates = append(candidates, k)
 		}
 	}
-	
+
 	// Final fallback if everything is backoff/exhausted
 	if len(candidates) == 0 {
 		for _, k := range p.keys {

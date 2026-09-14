@@ -21,8 +21,9 @@ func TestMaskID(t *testing.T) {
 
 func TestSanitizeMessage(t *testing.T) {
 	msg := "failed: sk-1234567890123"
-	if got := pool.SanitizeMessage(msg); got == msg {
-		t.Errorf("SanitizeMessage failed, got %s", got)
+	expected := "failed: sk-1...0123"
+	if got := pool.SanitizeMessage(msg); got != expected {
+		t.Errorf("SanitizeMessage failed, expected %q, got %q", expected, got)
 	}
 }
 
@@ -38,24 +39,24 @@ func TestNextRefreshFormatted(t *testing.T) {
 }
 
 func TestKeyCountAndGetByID(t *testing.T) {
-    p := pool.NewPool(nil, []*pool.KeyEntry{
-        {ID: "k1"}, {ID: "k2"},
-    }, 1*time.Minute)
-    
-    if p.KeyCount() != 2 {
-        t.Errorf("expected 2 keys, got %d", p.KeyCount())
-    }
-    
-    key, err := p.GetKeyByID("k1")
-    if err != nil {
-        t.Errorf("unexpected error: %v", err)
-    }
-    if key.ID != "k1" {
-        t.Errorf("expected k1, got %s", key.ID)
-    }
-    
-    _, err = p.GetKeyByID("k3")
-    if err == nil {
-        t.Errorf("expected error for non-existent key")
-    }
+	p := pool.NewPool(nil, []*pool.KeyEntry{
+		{ID: "k1"}, {ID: "k2"},
+	}, 1*time.Minute)
+
+	if p.KeyCount() != 2 {
+		t.Errorf("expected 2 keys, got %d", p.KeyCount())
+	}
+
+	key, err := p.GetKeyByID("k1")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if key.ID != "k1" {
+		t.Errorf("expected k1, got %s", key.ID)
+	}
+
+	_, err = p.GetKeyByID("k3")
+	if err == nil {
+		t.Errorf("expected error for non-existent key")
+	}
 }

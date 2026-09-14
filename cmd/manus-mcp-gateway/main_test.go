@@ -20,6 +20,12 @@ line2"
 		t.Fatalf("failed to write test env: %v", err)
 	}
 
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TEST_KEY_SIMPLE")
+		_ = os.Unsetenv("TEST_KEY_QUOTED")
+		_ = os.Unsetenv("TEST_KEY_MULTILINE")
+	})
+
 	loadDotEnv(envPath)
 
 	if os.Getenv("TEST_KEY_SIMPLE") != "simple_value" {

@@ -93,8 +93,6 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 	}
 	p := pool.NewPool(client, keys, 1*time.Minute)
 	srv := NewServer(p, client, nil)
-	
-	_ = srv.MCPServer()
 
 	return srv, ts
 }
@@ -198,7 +196,7 @@ func TestServerCreateTaskFailover(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/v2/usage.availableCredits" {
 			resp := manus.AvailableCreditsResponse{
-				OK: true,
+				OK:   true,
 				Data: &manus.AvailableCredits{TotalCredits: 300},
 			}
 			_ = json.NewEncoder(w).Encode(resp)
@@ -210,7 +208,7 @@ func TestServerCreateTaskFailover(t *testing.T) {
 				// Simulate failure on first key
 				w.WriteHeader(http.StatusTooManyRequests)
 				resp := manus.StandardResponse{
-					OK: false,
+					OK:    false,
 					Error: &manus.APIError{Code: "rate_limited", Message: "rate limit"},
 				}
 				_ = json.NewEncoder(w).Encode(resp)
@@ -220,9 +218,9 @@ func TestServerCreateTaskFailover(t *testing.T) {
 			resp := manus.CreateTaskResponse{
 				OK: true,
 				Data: &manus.CreateTaskData{
-					TaskID: "task_999",
+					TaskID:    "task_999",
 					TaskTitle: "Failover Test Task",
-					Status: "pending",
+					Status:    "pending",
 				},
 			}
 			_ = json.NewEncoder(w).Encode(resp)
@@ -244,12 +242,12 @@ func TestServerCreateTaskFailover(t *testing.T) {
 	createReq := mcp.CallToolRequest{}
 	createReq.Params.Name = "manus_create_task"
 	createReq.Params.Arguments = map[string]any{"prompt": "Test failover"}
-	
+
 	res, err := srv.handleCreateTask(ctx, createReq)
 	if err != nil {
 		t.Fatalf("create error: %v", err)
 	}
-	
+
 	text := res.Content[0].(mcp.TextContent).Text
 	if !strings.Contains(text, "Task Dispatched Successfully") {
 		t.Errorf("expected success after failover, got: %s", text)
@@ -308,7 +306,7 @@ func TestSearchKeyByMessagesFallback(t *testing.T) {
 		switch r.URL.Path {
 		case "/v2/usage.availableCredits":
 			resp := manus.AvailableCreditsResponse{
-				OK: true,
+				OK:   true,
 				Data: &manus.AvailableCredits{TotalCredits: 100},
 			}
 			_ = json.NewEncoder(w).Encode(resp)
