@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          check-latest: true
+
+      - name: Build Binaries
+        env:
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          VERSION=${GITHUB_REF_NAME}
+
+          TARGETS=(
+            "linux/amd64/manus-mcp-gateway-linux-amd64"
+            "linux/arm64/manus-mcp-gateway-linux-arm64"
+            "darwin/amd64/manus-mcp-gateway-darwin-amd64"
+            "darwin/arm64/manus-mcp-gateway-darwin-arm64"
+            "windows/amd64/manus-mcp-gateway-windows-amd64.exe"
+            "windows/arm64/manus-mcp-gateway-windows-arm64.exe"
+          )
+
+          for target in "${TARGETS[@]}"; do
+            IFS="/" read -r GOOS GOARCH OUTNAME <<< "$target"
+            echo "Compiling for $GOOS/$GOARCH -> dist/$OUTNAME..."
+            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w -X main.version=$VERSION" -o "dist/$OUTNAME" ./cmd/manus-mcp-gateway
+          done
+
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
