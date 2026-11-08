@@ -13,6 +13,13 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
+var (
+	// Version is injected at build time via -ldflags
+	Version = "dev"
+	// CommitSHA is injected at build time via -ldflags
+	CommitSHA = "unknown"
+)
+
 // loadDotEnv parses a local .env file if present without external dependencies.
 // It supports multiline values enclosed in double or single quotes.
 func loadDotEnv(path string) {
@@ -71,6 +78,13 @@ func loadDotEnv(path string) {
 }
 
 func main() {
+	for _, arg := range os.Args[1:] {
+		if arg == "--version" || arg == "-v" || arg == "version" {
+			fmt.Printf("manus-mcp-gateway version %s (commit: %s)\n", Version, CommitSHA)
+			return
+		}
+	}
+
 	if envFile := os.Getenv("MANUS_ENV_FILE"); envFile != "" {
 		loadDotEnv(envFile)
 	}
